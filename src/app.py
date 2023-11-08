@@ -1,29 +1,36 @@
 from flask import Flask, render_template, session, request, redirect, url_for
 from flask_bootstrap import Bootstrap5
 from flask_login import UserMixin,login_user,LoginManager,logout_user,current_user,login_required
-from werkzeug.urls import url_encode
+#from werkzeug.urls import url_encode
 from flask_sqlalchemy import SQLAlchemy
 import sqlite3
 from flask_wtf import FlaskForm
-from wtforms import StringField,PasswordField,SubmitField
+from wtforms import StringField,PasswordField,SubmitField,validators,BooleanField
 from wtforms.validators import InputRequired,Length,ValidationError
 from flask_bcrypt import Bcrypt
+import mysql.connector
 
 
 app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///database.db'
-app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
-    "connect_args": {
-        "check_same_thread": False
-    }
-}
+
+connection = mysql.connector.connect(
+    user='root',password='12345',host='localhost',port='3306')
+cursor = connection.cursor()
+cursor.execute("CREATE DATABASE auth_user")
+cursor.execute("USE auth_user")
+cursor.execute('''CREATE TABLE IF NOT EXISTS user(
+                        ID int NOT NULL,
+                        email varchar(20),
+                        password varchar(20),
+                        PRIMARY KEY (ID))
+                    ''')
+
 
 # print(app.config['SQLALCHEMY_DATABASE_URI'])
 
 app.config['SECRET_KEY'] = 'tsecrectkeyashonlyknows'
 bootstrap = Bootstrap5(app)
-bcrypt= Bcrypt(app)
-db = SQLAlchemy(app)
+
 
 #In the python shell CLI type
 #from app import app,db
@@ -31,40 +38,27 @@ db = SQLAlchemy(app)
 #db.create_all()
 
 
-login_manager = LoginManager()#app and flask login to wroktoghter
-login_manager.init_app(app)
-login_manager.login_view="login"
-
-@login_manager.user_loader#reload
-def load_suer(user_id):
-    return User.query.get(int(user_id))
 
 
 # Define the User model
-class User(db.Model, UserMixin):
-    id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(20), nullable=False,unique=True)
-    password = db.Column(db.String(80), nullable=False)
+
 
 # def __repr__(self):
 #     return f'<User{self.username}>'
 
 class RegisterForm(FlaskForm):
-    username = StringField(validators=[InputRequired(),Length(min=2,max=20)] , render_kw={"placeholder":"Username"})
-    password = PasswordField(validators=[InputRequired(),Length(min=4, max=20)],render_kw={"placeholder": "Password"})
-    submit = SubmitField("Register")
-    # for validation of username , when the user inputs the username its used to validate it
-    def validate_username(sel, username):
-        exisiting_user_username = User.query.filter_by(
-            username=username.data).first()
-
-        if exisiting_user_username:
-            raise ValidationError(
-                "That username already exists . Please choose a diffrenet one.")
+    email = StringField('Email Address', [validators.Length(min=6, max=35)])
+    password = PasswordField('New Password', [
+        validators.DataRequired(),
+        validators.EqualTo('confirm', message='Passwords must match')
+    ])
+    confirm = PasswordField('Repeat Password')
+    accept_tos = BooleanField('I accept the TOS', [validators.DataRequired()])
+    
 
 
 class LoginForm(FlaskForm):
-    username = StringField(validators=[InputRequired(),Length(min=2,max=20)] , render_kw={"placeholder":"Username"})
+    email = StringField(validators=[InputRequired(),Length(min=2,max=20)] , render_kw={"placeholder":"Username"})
     password = PasswordField(validators=[InputRequired(),Length(min=4, max=20)],render_kw={"placeholder": "Password"})
     submit = SubmitField("Login")
 
@@ -76,11 +70,11 @@ def Home():
 @app.route('/register', methods=("GET", "POST"))
 def register():
     form = RegisterForm()
-    if form.validate_on_submit():
-        hashed_password=bcrypt.generate_password_hash(form.password.data)
-        new_user = User(username=form.username.data, password=hashed_password)
-        db.session.add(new_user)
-        db.session.commit()
+    if request.method == "POST" and form.validate_on_submit():
+        email=form.email.data
+        pswd = form.password.data
+        sql = "INSERT INTO user(email,password) VALUES("+email +","+ pswd+")"
+        cursor.execute()
         return redirect(url_for('login'))
 
     
@@ -89,31 +83,45 @@ def register():
 @app.route('/login', methods=('GET', 'POST'))
 def login():
     form=LoginForm()
-    if form.validate_on_submit():
-        user=User.query.filter_by(username=form.username.data).first()
-        if user:
-            if bcrypt.check_password_hash(user.password,form.password.data):
-                login_user(user)
-                return redirect(url_for('Profile'))
+    if request.method == "POST" and form.validate_on_submit():
+        email = form.email.data
+        pswd = form.password.data
+        cursor.execute("SELECT password FROM user")
+        ps_sql = cursor.fectall()
+        cursor.executr("SELECT email FROM user")
+        em_sql = cursor.fetchall()
+        count_ps=0
+        count_em=0
+        res1=0
+        res2=0
+        data=[{email}]
+        for p in ps_sql:
+            if p==pswd:
+                res1=1
+            count_ps+=1
+        for e in em_sql:
+            if e==email:
+                res2=1
+            count_em+=1
+        if(res1==res2 and count_em==count_ps):
+            return render_template('Profile.html',data=data)    
+    
     return render_template('login.html',form=form)
 
 
 
 @app.route('/logout')
-@login_required
 def logout():
     logout_user()
     redirect(url_for('login'))
 
 
 @app.route('/Profile')
-@login_required
 def Profile():
     return render_template('Profile.html')
 
 if __name__ == '__main__':
-    with app.app_context():
-        db.create_all()
+
     app.run(debug=True)
 
 
